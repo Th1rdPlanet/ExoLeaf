@@ -29,7 +29,7 @@ index 756967523bca9e3923bdd814522c80afb3732723..8716e2655f6238022841638102aecfbd
 +            final boolean tooLong = this.exoUnwritableSince != 0L
 +                && now - this.exoUnwritableSince > org.dreeam.leaf.config.modules.network.SlowClientProtection.maxUnwritableNanos;
 +            if (tooMuch || tooLong) {
-+                LOGGER.info("[-] network  » {} отключён: клиент не принимает данные ({} КБ в очереди)", this.getLoggableAddress(net.minecraft.server.MinecraftServer.getServer().logIPs()), pending / 1024);
++                LOGGER.info("[-] network  » {}  queue:{} KiB  client:slow", this.getLoggableAddress(net.minecraft.server.MinecraftServer.getServer().logIPs()), pending / 1024);
 +                this.disconnect(Component.literal("Соединение слишком медленное"));
 +                return;
 +            }
