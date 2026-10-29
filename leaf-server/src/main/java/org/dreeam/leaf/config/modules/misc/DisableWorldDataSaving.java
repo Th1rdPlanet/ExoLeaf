@@ -27,6 +27,12 @@ public class DisableWorldDataSaving extends ConfigModules {
     }
 
     public static boolean shouldSkipSave(ServerLevel serverLevel) {
-        return !worlds.isEmpty() && worlds.contains(serverLevel.getWorld().getName());
+        String name = serverLevel.getWorld().getName();
+        // ExoLeaf - lobby mode reuses the same skip
+        if (org.dreeam.leaf.config.modules.lobby.LobbyMode.disableWorldSaving
+            && org.dreeam.leaf.config.modules.lobby.LobbyMode.appliesTo(name)) {
+            return true;
+        }
+        return !worlds.isEmpty() && worlds.contains(name);
     }
 }

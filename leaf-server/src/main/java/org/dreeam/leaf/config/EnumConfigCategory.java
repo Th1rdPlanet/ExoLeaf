@@ -6,7 +6,8 @@ public enum EnumConfigCategory {
     FIXES("fixes"),
     GAMEPLAY("gameplay-mechanisms"),
     NETWORK("network"),
-    MISC("misc");
+    MISC("misc"),
+    LOBBY("lobby-mode");
 
     private final String baseKeyName;
     private static final EnumConfigCategory[] VALUES = EnumConfigCategory.values();
