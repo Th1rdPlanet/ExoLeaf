@@ -101,6 +101,25 @@ public class LobbyMode extends ConfigModules {
             "Радиус платформы в блоках (0 — один блок).");
     }
 
+    @Override
+    public void onPostLoaded() {
+        if (!enabled) {
+            return;
+        }
+        List<String> parts = new ArrayList<>();
+        if (freezeEntities) parts.add("entities:frozen");
+        if (disableMobSpawning) parts.add("spawn:off");
+        if (disableRandomTicks) parts.add("random-ticks:off");
+        if (disableFluids) parts.add("fluids:off");
+        if (disableWeather) parts.add("weather:off");
+        if (disableRedstone) parts.add("redstone:off");
+        if (hideNametags) parts.add("nametags:hidden");
+        if (hideLatency) parts.add("latency:hidden");
+        if (disableWorldSaving || disablePlayerDataSaving) parts.add("saving:off");
+        if (voidWorld) parts.add("void-world");
+        LOGGER.info("[*] lobby    » {}  worlds:{}", String.join("  ", parts), worlds.isEmpty() ? "all" : String.join(",", worlds));
+    }
+
     /** Whether lobby mode applies to the world with this name. */
     public static boolean appliesTo(String worldName) {
         return enabled && (worlds.isEmpty() || worlds.contains(worldName));
