@@ -1,9 +1,12 @@
 package ru.moonlightproject.dev.exoleaf;
 
+import java.util.List;
 import java.util.Random;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Biome;
+import org.bukkit.generator.BiomeProvider;
 import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.generator.WorldInfo;
 import org.dreeam.leaf.config.modules.lobby.LobbyMode;
@@ -11,7 +14,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Lobby-mode generator: every chunk is empty except an optional platform under the spawn point
- * (0, {@value #SPAWN_Y}, 0). No noise, caves, decorations, structures or mobs.
+ * (0, {@value #SPAWN_Y}, 0). No noise, caves, decorations, structures or mobs, and a single
+ * fixed biome: without it the world would still sample the climate noise for every new chunk,
+ * which is most of the cost of generating a chunk.
  */
 public final class VoidChunkGenerator extends ChunkGenerator {
 
@@ -38,6 +43,23 @@ public final class VoidChunkGenerator extends ChunkGenerator {
                 }
             }
         }
+    }
+
+    private static final BiomeProvider SINGLE_BIOME = new BiomeProvider() {
+        @Override
+        public Biome getBiome(WorldInfo worldInfo, int x, int y, int z) {
+            return Biome.PLAINS;
+        }
+
+        @Override
+        public List<Biome> getBiomes(WorldInfo worldInfo) {
+            return List.of(Biome.PLAINS);
+        }
+    };
+
+    @Override
+    public BiomeProvider getDefaultBiomeProvider(WorldInfo worldInfo) {
+        return SINGLE_BIOME;
     }
 
     @Override
