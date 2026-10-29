@@ -34,6 +34,34 @@ index 9f8dc80f279e2fa6e4c7a292c6239dc5fe9ee15f..1dcf7e082a46e78f125da1775bcc7cbd
          final boolean isConcurrent = org.dreeam.leaf.config.modules.async.SparklyPaperParallelWorldTicking.enabled; // Leaf - SparklyPaper - parallel world ticking
          if (this.isFirstPacket || !this.rootsToUpdate.isEmpty() || !this.progressChanged.isEmpty()) {
              Map<Identifier, AdvancementProgress> map = new HashMap<>();
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index ace8962353cb54fce23f696157524d615c89a762..5f4005b9e4f9bf343116cece71114a148f9d8990 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -1462,6 +1462,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                     flag = false;
+                 }
+                 // CraftBukkit end
++                // ExoLeaf start - lobby mode: players do not see each other
++                if (flag && this.entity instanceof ServerPlayer && ChunkMap.this.level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.hidePlayers) {
++                    flag = false;
++                }
++                // ExoLeaf end - lobby mode
+                 if (flag) {
+                     if (this.seenBy.add(player.connection)) {
+                         this.seenByUpdated(); // Leaf - Multithreaded tracker
+@@ -1625,6 +1630,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                     flag = false;
+                 }
+                 // CraftBukkit end
++                // ExoLeaf start - lobby mode: players do not see each other
++                if (flag && this.entity instanceof ServerPlayer && ChunkMap.this.level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.hidePlayers) {
++                    flag = false;
++                }
++                // ExoLeaf end - lobby mode
+                 if (flag) {
+                     if (this.seenBy.add(player.connection)) {
+                         // Paper start - entity tracking events
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
 index cc1d86567653142f3466514cdc0cb1b613b88dc3..dde88c4b8f8cf14f1647b7dbdfc79ab908f4946d 100644
 --- a/net/minecraft/server/level/ServerChunkCache.java

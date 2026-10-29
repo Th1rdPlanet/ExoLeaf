@@ -29,6 +29,7 @@ public class LobbyMode extends ConfigModules {
 
     public static boolean hideNametags = true;
     public static boolean hideLatency = true;
+    public static boolean hidePlayers = true;
 
     public static boolean disableWorldSaving = true;
     public static boolean disablePlayerDataSaving = true;
@@ -82,6 +83,9 @@ public class LobbyMode extends ConfigModules {
         hideNametags = config.getBoolean(base + ".players.hide-nametags", hideNametags, """
             Не показывать ники над игроками (служебная команда скорборда с невидимыми никами).
             Если плагин сам раздаёт игрокам команды скорборда, его настройки ников главнее.""");
+        hidePlayers = config.getBoolean(base + ".players.hide-players", hidePlayers, """
+            Игроки не видят друг друга в мире: сервер не отправляет их сущности. Список игроков
+            (TAB) и чат это не затрагивает.""");
         hideLatency = config.getBoolean(base + ".players.hide-latency", hideLatency,
             "Не рассылать обновления пинга в списке игроков.");
 
@@ -113,6 +117,7 @@ public class LobbyMode extends ConfigModules {
         if (disableFluids) parts.add("fluids:off");
         if (disableWeather) parts.add("weather:off");
         if (disableRedstone) parts.add("redstone:off");
+        if (hidePlayers) parts.add("players:hidden");
         if (hideNametags) parts.add("nametags:hidden");
         if (hideLatency) parts.add("latency:hidden");
         if (disableWorldSaving || disablePlayerDataSaving) parts.add("saving:off");
