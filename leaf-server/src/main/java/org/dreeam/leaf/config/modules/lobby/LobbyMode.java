@@ -117,7 +117,7 @@ public class LobbyMode extends ConfigModules {
         if (hideLatency) parts.add("latency:hidden");
         if (disableWorldSaving || disablePlayerDataSaving) parts.add("saving:off");
         if (voidWorld) parts.add("void-world");
-        LOGGER.info("[*] lobby    » {}  worlds:{}", String.join("  ", parts), worlds.isEmpty() ? "all" : String.join(",", worlds));
+        LOGGER.info(ru.moonlightproject.dev.exoleaf.Ansi.line("[*] lobby    » {}  worlds:{}"), String.join("  ", parts), worlds.isEmpty() ? "all" : String.join(",", worlds));
     }
 
     /** Whether lobby mode applies to the world with this name. */
