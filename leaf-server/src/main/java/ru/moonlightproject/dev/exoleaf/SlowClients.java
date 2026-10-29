@@ -51,12 +51,12 @@ public final class SlowClients {
                 break;
             }
             Connection connection = connections.get((int) entry[1]);
-            connection.disconnect(Component.literal("Соединение слишком медленное"));
+            connection.disconnect(Component.literal("Connection too slow"));
             projected -= entry[0];
             dropped++;
         }
         if (dropped > 0) {
-            LOGGER.warn("[!] network  » direct-memory:{}/{} MiB  slow-clients:dropped:{}",
+            LOGGER.warn(Ansi.line("[!] network  » direct-memory:{}/{}MiB  slow-clients-dropped:{}"),
                 used / 1048576, max / 1048576, dropped);
         }
     }

@@ -1,11 +1,11 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: 1VicTim1 <122aaa121@gmail.com>
-Date: Thu, 29 Oct 2026 13:11:33 +0500
+Date: Thu, 29 Oct 2026 17:54:05 +0500
 Subject: [PATCH] ExoLeaf: slow client protection
 
 
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
-index 756967523bca9e3923bdd814522c80afb3732723..8716e2655f6238022841638102aecfbd7ee14022 100644
+index 756967523bca9e3923bdd814522c80afb3732723..9a68118cc681a1996595ce88e4199eaf3deada0f 100644
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
 @@ -601,7 +601,29 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
@@ -29,8 +29,8 @@ index 756967523bca9e3923bdd814522c80afb3732723..8716e2655f6238022841638102aecfbd
 +            final boolean tooLong = this.exoUnwritableSince != 0L
 +                && now - this.exoUnwritableSince > org.dreeam.leaf.config.modules.network.SlowClientProtection.maxUnwritableNanos;
 +            if (tooMuch || tooLong) {
-+                LOGGER.info("[-] network  » {}  queue:{} KiB  client:slow", this.getLoggableAddress(net.minecraft.server.MinecraftServer.getServer().logIPs()), pending / 1024);
-+                this.disconnect(Component.literal("Соединение слишком медленное"));
++                LOGGER.info(ru.moonlightproject.dev.exoleaf.Ansi.line("[-] network  » {}  queue:{}KiB  client:slow"), this.getLoggableAddress(net.minecraft.server.MinecraftServer.getServer().logIPs()), pending / 1024);
++                this.disconnect(Component.literal("Connection too slow"));
 +                return;
 +            }
 +        }
@@ -38,3 +38,15 @@ index 756967523bca9e3923bdd814522c80afb3732723..8716e2655f6238022841638102aecfbd
          this.flushQueue();
          // Paper start - Buffer joins to world
          if (Connection.currTick != net.minecraft.server.MinecraftServer.currentTick) {
+diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/minecraft/server/network/ServerConnectionListener.java
+index 4e6676b57f493ca90e058cdadf324d3627e270a9..ab6a2d6c9d36b7aef6f6b8ed06cad4eef5be4fe7 100644
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -215,6 +215,7 @@ public class ServerConnectionListener {
+         synchronized (this.connections) {
+             // Spigot start
+             this.addPending(); // Paper - prevent blocking on adding a new connection while the server is ticking
++            ru.moonlightproject.dev.exoleaf.SlowClients.enforce(this.connections); // ExoLeaf - slow client protection
+             // This prevents players from 'gaming' the server, and strategically relogging to increase their position in the tick order
+             if (org.spigotmc.SpigotConfig.playerShuffle > 0 && MinecraftServer.currentTick % org.spigotmc.SpigotConfig.playerShuffle == 0) {
+                 Collections.shuffle(this.connections);
