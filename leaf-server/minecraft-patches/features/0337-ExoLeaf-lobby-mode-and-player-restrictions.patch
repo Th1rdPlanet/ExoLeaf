@@ -92,10 +92,29 @@ index ace8962353cb54fce23f696157524d615c89a762..053058a6113049f6617bde8102ce29f1
                      if (this.seenBy.add(player.connection)) {
                          // Paper start - entity tracking events
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
-index cc1d86567653142f3466514cdc0cb1b613b88dc3..dde88c4b8f8cf14f1647b7dbdfc79ab908f4946d 100644
+index cc1d86567653142f3466514cdc0cb1b613b88dc3..8b4026806e0b9a3017fbf21797049d0894337c85 100644
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -700,7 +700,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+@@ -602,6 +602,18 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         int naturalSpawnChunkCount = this.distanceManager.getNaturalSpawnChunkCount();
+         // Paper start - Optional per player mob spawns
+         NaturalSpawner.SpawnState spawnState;
++        // ExoLeaf start - skip mob counting while nothing can spawn
++        // The spawn state walks every entity of the world. It only feeds natural spawning, so while
++        // spawning is impossible (no categories, gamerule off, no players, lobby mode) an occasional
++        // refresh for API readers is enough; once spawning is possible it is counted every tick.
++        final boolean exoSpawningImpossible = !(this.spawnFriendlies || this.spawnEnemies)
++            || !this.level.getGameRules().get(GameRules.SPAWN_MOBS)
++            || this.level.players().isEmpty()
++            || (this.level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableMobSpawning);
++        if (exoSpawningImpossible && lastSpawnState != null && this.level.getGameTime() % 100L != 0L) {
++            // keep the last spawn state
++        } else
++        // ExoLeaf end
+         if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
+             if (!org.dreeam.leaf.config.modules.async.AsyncMobSpawning.enabled) { // Pufferfish - moved down when async processing
+             // re-set mob counts
+@@ -700,7 +712,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
              this.level.tickThunder(chunk);
          }
  
