@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Thu, 29 Oct 2026 13:11:33 +0500
+Subject: [PATCH] ExoLeaf: slow client protection
+
+
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+index 756967523bca9e3923bdd814522c80afb3732723..8716e2655f6238022841638102aecfbd7ee14022 100644
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -601,7 +601,29 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+     private static int joinAttemptsThisTick; // Paper - Buffer joins to world
+     private static int currTick; // Paper - Buffer joins to world
+     private static int tickSecond; // Purpur - Max joins per second
++    private long exoUnwritableSince; // ExoLeaf - slow client protection
++
+     public void tick() {
++        // ExoLeaf start - slow client protection
++        if (org.dreeam.leaf.config.modules.network.SlowClientProtection.enabled && this.channel != null && this.channel.isOpen()) {
++            final io.netty.channel.ChannelOutboundBuffer buffer = this.channel.unsafe().outboundBuffer();
++            final long pending = buffer == null ? 0L : buffer.totalPendingWriteBytes();
++            final long now = System.nanoTime();
++            if (this.channel.isWritable()) {
++                this.exoUnwritableSince = 0L;
++            } else if (this.exoUnwritableSince == 0L) {
++                this.exoUnwritableSince = now;
++            }
++            final boolean tooMuch = pending > org.dreeam.leaf.config.modules.network.SlowClientProtection.maxPendingBytes;
++            final boolean tooLong = this.exoUnwritableSince != 0L
++                && now - this.exoUnwritableSince > org.dreeam.leaf.config.modules.network.SlowClientProtection.maxUnwritableNanos;
++            if (tooMuch || tooLong) {
++                LOGGER.info("[-] network  » {} отключён: клиент не принимает данные ({} КБ в очереди)", this.getLoggableAddress(net.minecraft.server.MinecraftServer.getServer().logIPs()), pending / 1024);
++                this.disconnect(Component.literal("Соединение слишком медленное"));
++                return;
++            }
++        }
++        // ExoLeaf end - slow client protection
+         this.flushQueue();
+         // Paper start - Buffer joins to world
+         if (Connection.currTick != net.minecraft.server.MinecraftServer.currentTick) {

@@ -7,17 +7,22 @@ DIR="$TOOLS/../loadtest/exo"
 LABEL="${1:-run}"; BOTS="${2:-200}"; SECONDS_TOTAL="${3:-100}"
 "$TOOLS/testserver.sh" start
 for _ in $(seq 1 120); do grep -q "Done (" "$DIR/server.log" 2>/dev/null && break; sleep 1; done
-python3 -I "$TOOLS/loadbots.py" --port 25570 --bots "$BOTS" --rate 20 --duration "$SECONDS_TOTAL" > "$DIR/bots-$LABEL.log" 2>&1 &
-BOTS_PID=$!
+# Four bot processes: one Python process cannot decode chunk data for hundreds of clients.
+PIDS=()
+for part in 0 1 2 3; do
+  python3 -I "$TOOLS/loadbots.py" --port 25570 --bots $(( BOTS / 4 )) --rate 5 --duration "$SECONDS_TOTAL" \
+    --prefix "B${part}_" > "$DIR/bots-$LABEL-$part.log" 2>&1 &
+  PIDS+=($!)
+done
 sleep $(( SECONDS_TOTAL / 2 ))
 "$TOOLS/testserver.sh" cmd "mspt"
 sleep $(( SECONDS_TOTAL / 2 - 10 ))
 "$TOOLS/testserver.sh" cmd "mspt"
 "$TOOLS/testserver.sh" cmd "tps"
 sleep 3
-wait $BOTS_PID || true
+wait "${PIDS[@]}" || true
 echo "== $LABEL: bots =="
-grep FINAL "$DIR/bots-$LABEL.log" || tail -2 "$DIR/bots-$LABEL.log"
+grep -h FINAL "$DIR"/bots-$LABEL-*.log || tail -n 2 "$DIR"/bots-$LABEL-*.log
 echo "== $LABEL: server =="
 grep -A4 -E "Server tick times|TPS from last" "$DIR/server.log" | sed 's/\x1b\[[0-9;]*m//g' | grep -vE "^--$" | tail -12
 "$TOOLS/testserver.sh" stop

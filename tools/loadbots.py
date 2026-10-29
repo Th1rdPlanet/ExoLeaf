@@ -18,6 +18,8 @@ C_S_INFO, C_S_FINISH, C_S_KEEPALIVE, C_S_PONG, C_S_KNOWN_PACKS = 0, 3, 4, 5, 7
 P_C_DISCONNECT, P_C_KEEPALIVE, P_C_PING, P_C_POSITION, P_C_START_CONFIG = 32, 43, 59, 70, 116
 P_S_TELEPORT, P_S_KEEPALIVE, P_S_POS, P_S_PONG, P_S_LOADED, P_S_CONFIG_ACK = 0, 27, 29, 44, 43, 15
 
+PLAY_INTERESTING = {P_C_DISCONNECT, P_C_KEEPALIVE, P_C_PING, P_C_POSITION, P_C_START_CONFIG}
+
 stats = {"connected": 0, "playing": 0, "failed": 0, "disconnected": 0, "bytes_in": 0}
 reasons = {}
 
@@ -54,8 +56,8 @@ def string(s):
 
 
 class Bot:
-    def __init__(self, name, host, port, walk):
-        self.name, self.host, self.port, self.walk = name, host, port, walk
+    def __init__(self, name, host, port, walk, view=2):
+        self.name, self.host, self.port, self.walk, self.view = name, host, port, walk, view
         self.threshold = -1
         self.state = "login"
         self.pos = None
@@ -74,7 +76,16 @@ class Bot:
         stats["bytes_in"] += n + 1
         if self.threshold >= 0:
             size, i = read_varint(data, 0)
-            data = zlib.decompress(data[i:]) if size else data[i:]
+            if size:
+                if self.state == "play":
+                    # Peek at the packet id; only decompress packets the bot reacts to.
+                    head = zlib.decompressobj().decompress(data[i:], 5)
+                    pid, _ = read_varint(head, 0)
+                    if pid not in PLAY_INTERESTING:
+                        return pid, b""
+                data = zlib.decompress(data[i:])
+            else:
+                data = data[i:]
         pid, i = read_varint(data, 0)
         return pid, data[i:]
 
@@ -109,7 +120,7 @@ class Bot:
                     elif pid == L_C_FINISHED:
                         self.send(L_S_ACK)
                         self.state = "config"
-                        self.send(C_S_INFO, string("en_us") + bytes([8]) + varint(0) + b"\x01" + bytes([0x7F]) + varint(1) + b"\x00\x01" + varint(0))
+                        self.send(C_S_INFO, string("en_us") + bytes([self.view]) + varint(0) + b"\x01" + bytes([0x7F]) + varint(1) + b"\x00\x01" + varint(0))
                     elif pid == L_C_QUERY:
                         mid, _ = read_varint(p, 0)
                         self.send(L_S_QUERY_ANSWER, varint(mid) + b"\x00")
@@ -185,11 +196,12 @@ async def main():
     ap.add_argument("--duration", type=int, default=120)
     ap.add_argument("--prefix", default="Bot")
     ap.add_argument("--no-walk", action="store_true")
+    ap.add_argument("--view-distance", type=int, default=2, help="client view distance (fewer chunks to decode)")
     a = ap.parse_args()
     tasks = []
     start = time.time()
     for n in range(a.bots):
-        bot = Bot(f"{a.prefix}{n:04d}"[:16], a.host, a.port, not a.no_walk)
+        bot = Bot(f"{a.prefix}{n:04d}"[:16], a.host, a.port, not a.no_walk, a.view_distance)
         tasks.append(asyncio.create_task(bot.run(a.duration - (time.time() - start))))
         await asyncio.sleep(1 / a.rate)
 

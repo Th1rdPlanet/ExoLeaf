@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Thu, 29 Oct 2026 13:20:40 +0500
+Subject: [PATCH] fixup! ExoLeaf: slow client protection
+
+ExoLeaf: slow client protection
+
+diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/minecraft/server/network/ServerConnectionListener.java
+index 4e6676b57f493ca90e058cdadf324d3627e270a9..ab6a2d6c9d36b7aef6f6b8ed06cad4eef5be4fe7 100644
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -215,6 +215,7 @@ public class ServerConnectionListener {
+         synchronized (this.connections) {
+             // Spigot start
+             this.addPending(); // Paper - prevent blocking on adding a new connection while the server is ticking
++            ru.moonlightproject.dev.exoleaf.SlowClients.enforce(this.connections); // ExoLeaf - slow client protection
+             // This prevents players from 'gaming' the server, and strategically relogging to increase their position in the tick order
+             if (org.spigotmc.SpigotConfig.playerShuffle > 0 && MinecraftServer.currentTick % org.spigotmc.SpigotConfig.playerShuffle == 0) {
+                 Collections.shuffle(this.connections);
