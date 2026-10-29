@@ -56,7 +56,7 @@ public final class SlowClients {
             dropped++;
         }
         if (dropped > 0) {
-            LOGGER.warn("[!] network  » direct memory {} МБ из {} МБ: отключено самых медленных клиентов: {}",
+            LOGGER.warn("[!] network  » direct-memory:{}/{} MiB  slow-clients:dropped:{}",
                 used / 1048576, max / 1048576, dropped);
         }
     }
