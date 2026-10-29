@@ -6,7 +6,8 @@ public enum ConfigCategory {
     FIXES("fixes"),
     GAMEPLAY("gameplay-mechanisms"),
     NETWORK("network"),
-    MISC("misc");
+    MISC("misc"),
+    LOBBY("lobby-mode"); // ExoLeaf - lobby mode
 
     private final String basePath;
 

@@ -32,3 +32,6 @@ paper-server
 # AI tools
 .codegraph
 .pi
+
+loadtest/
+__pycache__/

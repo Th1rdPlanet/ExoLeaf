@@ -1,0 +1,211 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Thu, 29 Oct 2026 12:04:35 +0500
+Subject: [PATCH] ExoLeaf: lobby mode and player restrictions
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 0033300feb485f08ab6dd5cd910426dceec35ae8..9622a2518339854b30f167c738cc6b1015634dd5 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -716,7 +716,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         List<CustomSpawner> list = ImmutableList.of(
+             new PhantomSpawner(), new PatrolSpawner(), new CatSpawner(), new VillageSiege(), new WanderingTraderSpawner(serverLevelData)
+         );
+-        final org.bukkit.generator.ChunkGenerator chunkGenerator = this.server.getGenerator(loadingInfo.name());
++        org.bukkit.generator.ChunkGenerator chunkGenerator = this.server.getGenerator(loadingInfo.name()); // ExoLeaf - lobby mode - not final
++        // ExoLeaf start - lobby mode: empty world unless a plugin set its own generator
++        if (chunkGenerator == null && org.dreeam.leaf.config.modules.lobby.LobbyMode.voidWorld && org.dreeam.leaf.config.modules.lobby.LobbyMode.appliesTo(loadingInfo.name())) {
++            chunkGenerator = new ru.moonlightproject.dev.exoleaf.VoidChunkGenerator();
++        }
++        // ExoLeaf end - lobby mode
+         org.bukkit.generator.BiomeProvider biomeProvider = this.server.getBiomeProvider(loadingInfo.name());
+         final org.bukkit.generator.WorldInfo worldInfo = new org.bukkit.craftbukkit.generator.CraftWorldInfo(
+             serverLevelData,
+diff --git a/net/minecraft/server/PlayerAdvancements.java b/net/minecraft/server/PlayerAdvancements.java
+index 9f8dc80f279e2fa6e4c7a292c6239dc5fe9ee15f..1dcf7e082a46e78f125da1775bcc7cbdcf0189e3 100644
+--- a/net/minecraft/server/PlayerAdvancements.java
++++ b/net/minecraft/server/PlayerAdvancements.java
+@@ -272,6 +272,7 @@ public class PlayerAdvancements {
+     }
+ 
+     public void flushDirty(ServerPlayer player, boolean showAdvancements) {
++        if (ru.moonlightproject.dev.exoleaf.ExoLeafImpl.restricted(player)) return; // ExoLeaf - player restrictions: everything is sent on release
+         final boolean isConcurrent = org.dreeam.leaf.config.modules.async.SparklyPaperParallelWorldTicking.enabled; // Leaf - SparklyPaper - parallel world ticking
+         if (this.isFirstPacket || !this.rootsToUpdate.isEmpty() || !this.progressChanged.isEmpty()) {
+             Map<Identifier, AdvancementProgress> map = new HashMap<>();
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index cc1d86567653142f3466514cdc0cb1b613b88dc3..dde88c4b8f8cf14f1647b7dbdfc79ab908f4946d 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -700,7 +700,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             this.level.tickThunder(chunk);
+         }
+ 
+-        if (!spawnCategories.isEmpty()) {
++        if (!spawnCategories.isEmpty() && !(this.level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableMobSpawning)) { // ExoLeaf - lobby mode
+             if (this.level.getWorldBorder().isWithinBounds(pos)) { // Paper - rewrite chunk system // Leaf - optimize mob spawning
+                 NaturalSpawner.spawnForChunk(this.level, chunk, spawnState, spawnCategories);
+             }
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index acaaf7d8648bc9d55721ee35bcea619e63a26005..18920af01da80e763b0b2db46670843362342787 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -181,7 +181,9 @@ import net.minecraft.world.waypoints.WaypointTransmitter;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+-public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLevel, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevelReader, ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel { // Paper - rewrite chunk system // Paper - chunk tick iteration
++public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLevel, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevelReader, ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel {
++    public volatile boolean exoLobby; // ExoLeaf - lobby mode, refreshed every tick
++ // Paper - rewrite chunk system // Paper - chunk tick iteration
+     public static final BlockPos END_SPAWN_POINT = new BlockPos(100, 50, 0);
+     public static final IntProvider RAIN_DELAY = UniformInt.of(12000, 180000);
+     public static final IntProvider RAIN_DURATION = UniformInt.of(12000, 24000);
+@@ -945,6 +947,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     public void tick(BooleanSupplier hasTimeLeft) {
+         ProfilerFiller profilerFiller = Profiler.get();
+         this.handlingTick = true;
++        this.exoLobby = org.dreeam.leaf.config.modules.lobby.LobbyMode.appliesTo(this.getWorld().getName()); // ExoLeaf - lobby mode
+         if (org.dreeam.leaf.config.modules.async.SparklyPaperParallelWorldTicking.enabled) this.processAsyncReadRequests(); // Leaf - SparklyPaper - parallel world ticking
+         TickRateManager tickRateManager = this.tickRateManager();
+         boolean runsNormally = tickRateManager.runsNormally();
+@@ -952,7 +955,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+             profilerFiller.push("world border");
+             this.getWorldBorder().tick();
+             profilerFiller.popPush("weather");
+-            this.advanceWeatherCycle();
++            if (!(this.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableWeather)) this.advanceWeatherCycle(); // ExoLeaf - lobby mode
+             profilerFiller.pop();
+         }
+ 
+@@ -999,6 +1002,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+             profilerFiller.push("blockTicks");
+             this.blockTicks.tick(l, paperConfig().environment.maxBlockTicks, this::tickBlock); // Paper - configurable max block ticks
+             profilerFiller.popPush("fluidTicks");
++            if (!(this.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableFluids)) // ExoLeaf - lobby mode
+             this.fluidTicks.tick(l, paperConfig().environment.maxFluidTicks, this::tickFluid); // Paper - configurable max fluid ticks
+             profilerFiller.pop();
+         }
+@@ -1058,6 +1062,13 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+ 
+                                     profilerFiller.push("tick");
+                                     // Gale start - Airplane - remove lambda from ticking guard - copied from guardEntityTick
++                                    // ExoLeaf start - lobby mode: frozen entities are kept but not simulated
++                                    if (this.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.freezeEntities && !(entity instanceof net.minecraft.world.entity.player.Player)
++                                        && !org.dreeam.leaf.config.modules.lobby.LobbyMode.keepsTicking(entity.getType())) {
++                                        profilerFiller.pop();
++                                        return;
++                                    }
++                                    // ExoLeaf end - lobby mode
+                                     try {
+                                         this.tickNonPassenger(entity); // Gale - Airplane - remove lambda from ticking guard - changed
+                                     } catch (Throwable var6) {
+@@ -1225,6 +1236,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     public final org.dreeam.leaf.world.EntityCollisionCache entityCollisionCache = new org.dreeam.leaf.world.EntityCollisionCache(); // Leaf - cache collision list
+     public final org.dreeam.leaf.util.FastBitRadixSort fastBitRadixSort = new org.dreeam.leaf.util.FastBitRadixSort(); // Leaf - fast bit radix sort
+     public void tickChunk(LevelChunk chunk, int randomTickSpeed) {
++        if (this.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableRandomTicks) return; // ExoLeaf - lobby mode
+         final net.minecraft.world.level.levelgen.BitRandomSource simpleRandom = this.simpleRandom; // Paper - optimise random ticking // Leaf - Faster random generator - upcasting
+         ChunkPos pos = chunk.getPos();
+         int minBlockX = pos.getMinBlockX();
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 67c13021344c93049f218b9dd5a0fccba09be75d..a2b74d83b38c3feb03021b6a1e9d63f3fca0d31c 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -291,6 +291,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+         @Override
+         public void sendInitialData(AbstractContainerMenu container, List<ItemStack> items, ItemStack carried, int[] remoteDataSlots) {
++            // ExoLeaf start - player restrictions: the client sees an empty inventory
++            if (ru.moonlightproject.dev.exoleaf.ExoLeafImpl.restricted(ServerPlayer.this)) {
++                items = net.minecraft.core.NonNullList.withSize(items.size(), ItemStack.EMPTY);
++                carried = ItemStack.EMPTY;
++            }
++            // ExoLeaf end - player restrictions
+             ServerPlayer.this.connection.send(new ClientboundContainerSetContentPacket(container.containerId, container.incrementStateId(), items, carried));
+ 
+             for (int i = 0; i < remoteDataSlots.length; i++) {
+@@ -307,11 +313,13 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+         @Override
+         public void sendSlotChange(AbstractContainerMenu container, int slot, ItemStack stack) {
++            if (ru.moonlightproject.dev.exoleaf.ExoLeafImpl.restricted(ServerPlayer.this)) stack = ItemStack.EMPTY; // ExoLeaf - player restrictions
+             ServerPlayer.this.connection.send(new ClientboundContainerSetSlotPacket(container.containerId, container.incrementStateId(), slot, stack));
+         }
+ 
+         @Override
+         public void sendCarriedChange(AbstractContainerMenu containerMenu, ItemStack stack) {
++            if (ru.moonlightproject.dev.exoleaf.ExoLeafImpl.restricted(ServerPlayer.this)) stack = ItemStack.EMPTY; // ExoLeaf - player restrictions
+             ServerPlayer.this.connection.send(new ClientboundSetCursorItemPacket(stack));
+         }
+ 
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index ccf2a7d2fbff4bfc9b6e4606059b4b2863071a08..c1aef39b2f2511e208359f930cebb3c9122140fe 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -315,6 +315,7 @@ public abstract class PlayerList {
+         player.getStats().markAllDirty();
+         player.getRecipeBook().sendInitialRecipeBook(player);
+         this.updateEntireScoreboard(serverLevel.getScoreboard(), player);
++        ru.moonlightproject.dev.exoleaf.HiddenNametags.onJoin(this, player); // ExoLeaf - lobby mode
+         this.server.invalidateStatus();
+         MutableComponent mutableComponent;
+         if (player.getGameProfile().name().equalsIgnoreCase(string)) {
+@@ -552,6 +553,7 @@ public abstract class PlayerList {
+         if (player instanceof org.leavesmc.leaves.replay.ServerPhotographer) return; // Leaves - skip photographer
+         if (!player.getBukkitEntity().isPersistent()) return; // CraftBukkit
+         player.lastSave = MinecraftServer.currentTick; // Paper - Incremental chunk and player saving
++        if (org.dreeam.leaf.config.modules.lobby.LobbyMode.enabled && org.dreeam.leaf.config.modules.lobby.LobbyMode.disablePlayerDataSaving) return; // ExoLeaf - lobby mode
+         this.playerIo.save(player);
+         ServerStatsCounter serverStatsCounter = player.getStats(); // CraftBukkit
+         if (serverStatsCounter != null) {
+@@ -606,6 +608,7 @@ public abstract class PlayerList {
+         return this.remove(player, net.kyori.adventure.text.Component.translatable("multiplayer.player.left", net.kyori.adventure.text.format.NamedTextColor.YELLOW, io.papermc.paper.configuration.GlobalConfiguration.get().messages.useDisplayNameInQuitMessage ? player.getBukkitEntity().displayName() : io.papermc.paper.adventure.PaperAdventure.asAdventure(player.getDisplayName())));
+     }
+     public net.kyori.adventure.text.@Nullable Component remove(ServerPlayer player, net.kyori.adventure.text.Component leaveMessage) {
++        ru.moonlightproject.dev.exoleaf.ExoLeafImpl.clear(player.getUUID()); // ExoLeaf - player restrictions
+         // Paper end - Fix kick event leave message not being sent
+         org.purpurmc.purpur.task.BossBarTask.removeFromAll(player.getBukkitEntity()); // Purpur - Implement TPSBar
+         org.leavesmc.leaves.protocol.core.LeavesProtocolManager.handlePlayerLeave(player); // Leaves - protocol
+@@ -934,7 +937,7 @@ public abstract class PlayerList {
+         // Gale start - Purpur - spread out sending all player info
+         ServerPlayer[] sendAllPlayerInfoBucket = this.sendAllPlayerInfoBuckets[this.sendAllPlayerInfoIn];
+ 
+-        if (sendAllPlayerInfoBucket != null) {
++        if (sendAllPlayerInfoBucket != null && !(org.dreeam.leaf.config.modules.lobby.LobbyMode.enabled && org.dreeam.leaf.config.modules.lobby.LobbyMode.hideLatency)) { // ExoLeaf - lobby mode
+             for (ServerPlayer target : sendAllPlayerInfoBucket) {
+                 // Gale end - Purpur - spread out sending all player info
+ 
+diff --git a/net/minecraft/stats/ServerRecipeBook.java b/net/minecraft/stats/ServerRecipeBook.java
+index ad12ca2a43e75aee60c55b4b686ac3ffae19a6c1..b12e2c94fc4f8e5b1891d974e5c41419dc25ea5c 100644
+--- a/net/minecraft/stats/ServerRecipeBook.java
++++ b/net/minecraft/stats/ServerRecipeBook.java
+@@ -114,6 +114,7 @@ public class ServerRecipeBook extends RecipeBook {
+     }
+ 
+     public void sendInitialRecipeBook(ServerPlayer player) {
++        if (ru.moonlightproject.dev.exoleaf.ExoLeafImpl.restricted(player)) return; // ExoLeaf - player restrictions: sent on release
+         player.connection.send(new ClientboundRecipeBookSettingsPacket(this.getBookSettings().copy()));
+         List<ClientboundRecipeBookAddPacket.Entry> list = new ArrayList<>(this.known.size());
+ 
+diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
+index b326d08dc75d01b35162cda95eda8b18b0feac39..f25a15ad1869e4c1830ac14d52374c80f65f4a93 100644
+--- a/net/minecraft/world/level/block/state/BlockBehaviour.java
++++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
+@@ -856,6 +856,7 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
+         }
+ 
+         public void handleNeighborChanged(Level level, BlockPos pos, Block neighborBlock, @Nullable Orientation orientation, boolean movedByPiston) {
++            if (level instanceof ServerLevel serverLevel && serverLevel.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableRedstone && org.dreeam.leaf.config.modules.lobby.LobbyMode.isRedstone(this.getBlock())) return; // ExoLeaf - lobby mode
+             this.getBlock().neighborChanged(this.asState(), level, pos, neighborBlock, orientation, movedByPiston);
+         }
+ 
+@@ -899,6 +900,7 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
+         }
+ 
+         public void tick(ServerLevel level, BlockPos pos, RandomSource random) {
++            if (level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableRedstone && org.dreeam.leaf.config.modules.lobby.LobbyMode.isRedstone(this.getBlock())) return; // ExoLeaf - lobby mode
+             this.getBlock().tick(this.asState(), level, pos, random);
+         }
+ 
