@@ -5,7 +5,7 @@ Subject: [PATCH] ExoLeaf: lobby mode and player restrictions
 
 
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 0033300feb485f08ab6dd5cd910426dceec35ae8..7f06e47631ee12b4801e59252a44ca7bdc2374f3 100644
+index 0033300feb485f08ab6dd5cd910426dceec35ae8..9ec6969c08fdd04b50ce1435671490ba71a4b0ff 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -716,7 +716,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -22,18 +22,16 @@ index 0033300feb485f08ab6dd5cd910426dceec35ae8..7f06e47631ee12b4801e59252a44ca7b
          org.bukkit.generator.BiomeProvider biomeProvider = this.server.getBiomeProvider(loadingInfo.name());
          final org.bukkit.generator.WorldInfo worldInfo = new org.bukkit.craftbukkit.generator.CraftWorldInfo(
              serverLevelData,
-@@ -1403,7 +1408,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1403,7 +1408,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                          org.purpurmc.purpur.PurpurConfig.tpsCatchup ? 5 : 1 //ConfigHolder.getConfig().tickLoop.catchupTicks.getOrDefault(MoonriseConfig.TickLoop.DEFAULT_CATCHUP_TICKS).intValue() // Purpur - Configurable TPS Catchup
                      );
  
 -                    lagging = getTPSIncluding5SecondsReadOnly()[0] < org.purpurmc.purpur.PurpurConfig.laggingThreshold; // Purpur - Lagging threshold // Gale - Purpur - 5 second TPS average
-+                    // ExoLeaf start - the lagging check needs only the 5 s average, once per second.
-+                    // Reading the cached TPS array recomputed all four windows (up to 15 minutes of
-+                    // tick times) every tick, because each new tick time clears the cache.
-+                    if (this.tickCount % 20 == 0) {
-+                        synchronized (this.statsLock) {
-+                            lagging = getTPS(this.tickTimes5s, l) < org.purpurmc.purpur.PurpurConfig.laggingThreshold; // Purpur - Lagging threshold
-+                        }
++                    // ExoLeaf start - the lagging check needs only the 5 s average. Reading the cached
++                    // TPS array recomputed all four windows every tick, because each new tick time
++                    // clears the cache; the 5 s average alone is a constant-time read.
++                    synchronized (this.statsLock) {
++                        lagging = getTPS(this.tickTimes5s, l) < org.purpurmc.purpur.PurpurConfig.laggingThreshold; // Purpur - Lagging threshold
 +                    }
 +                    // ExoLeaf end
  
@@ -52,22 +50,26 @@ index 9f8dc80f279e2fa6e4c7a292c6239dc5fe9ee15f..1dcf7e082a46e78f125da1775bcc7cbd
          if (this.isFirstPacket || !this.rootsToUpdate.isEmpty() || !this.progressChanged.isEmpty()) {
              Map<Identifier, AdvancementProgress> map = new HashMap<>();
 diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
-index ace8962353cb54fce23f696157524d615c89a762..053058a6113049f6617bde8102ce29f134ae9664 100644
+index ace8962353cb54fce23f696157524d615c89a762..a0bd5c9a103509c09889da18d5f046369f4f97e1 100644
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
-@@ -433,6 +433,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+@@ -433,6 +433,15 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
  
      private void processUnloads(BooleanSupplier hasMoreTime) {
          ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.processUnloads(); // Paper - rewrite chunk system
-+        // ExoLeaf start - lobby mode: a world that never saves needs no autosave queue
-+        if (this.level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableWorldSaving) {
++        // ExoLeaf start - no autosave queue when autosave is off
++        // An autosave interval of 0 (how autosave is usually turned off) was clamped to one tick, so
++        // every loaded chunk was offered for saving and re-sorted each tick. Chunks are still saved
++        // on unload and on shutdown. Lobby-mode worlds that never save skip the queue as well.
++        if (ca.spottedleaf.moonrise.common.PlatformHooks.get().configAutoSaveInterval(this.level) <= 0
++            || (this.level.exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.disableWorldSaving)) {
 +            return;
 +        }
-+        // ExoLeaf end - lobby mode
++        // ExoLeaf end
          ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.autoSave(); // Paper - rewrite chunk system
      }
  
-@@ -1462,6 +1467,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+@@ -1462,6 +1471,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
                      flag = false;
                  }
                  // CraftBukkit end
@@ -79,7 +81,7 @@ index ace8962353cb54fce23f696157524d615c89a762..053058a6113049f6617bde8102ce29f1
                  if (flag) {
                      if (this.seenBy.add(player.connection)) {
                          this.seenByUpdated(); // Leaf - Multithreaded tracker
-@@ -1625,6 +1635,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+@@ -1625,6 +1639,11 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
                      flag = false;
                  }
                  // CraftBukkit end

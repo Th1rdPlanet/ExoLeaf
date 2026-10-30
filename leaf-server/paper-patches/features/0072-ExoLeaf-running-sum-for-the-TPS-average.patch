@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Fri, 30 Oct 2026 04:58:06 +0500
+Subject: [PATCH] ExoLeaf: running sum for the TPS average
+
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/time/TickData.java b/src/main/java/ca/spottedleaf/moonrise/common/time/TickData.java
+index 9d46b26ab531b01189b7e57bfc5befa11de9f0b1..cb78ba687c97a118ea0443de188b2dca5dc24608 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/time/TickData.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/time/TickData.java
+@@ -11,6 +11,14 @@ public final class TickData {
+     private final long interval; // ns
+ 
+     private final ArrayDeque<TickTime> timeData = new ArrayDeque<>();
++    // ExoLeaf start - running TPS sum
++    // Sum of tick start-to-start differences for the entries that have a previous tick, kept up to
++    // date as entries enter and leave the window, so the TPS average no longer walks the whole
++    // window (up to 15 minutes of ticks) on every call. Entries without a previous tick (only the
++    // first tick after startup) depend on the tick interval and are added at read time.
++    private long startDifferenceSum;
++    private int entriesWithoutLastTick;
++    // ExoLeaf end - running TPS sum
+ 
+     public TickData(final long intervalNS) {
+         this.interval = intervalNS;
+@@ -26,11 +34,29 @@ public final class TickData {
+                 break;
+             }
+             this.timeData.pollFirst();
++            this.forget(first); // ExoLeaf - running TPS sum
+         }
+ 
+         this.timeData.add(time);
++        // ExoLeaf start - running TPS sum
++        if (time.hasLastTick()) {
++            this.startDifferenceSum += time.differenceFromLastTick(0L);
++        } else {
++            ++this.entriesWithoutLastTick;
++        }
++        // ExoLeaf end - running TPS sum
+     }
+ 
++    // ExoLeaf start - running TPS sum
++    private void forget(final TickTime time) {
++        if (time.hasLastTick()) {
++            this.startDifferenceSum -= time.differenceFromLastTick(0L);
++        } else {
++            --this.entriesWithoutLastTick;
++        }
++    }
++    // ExoLeaf end - running TPS sum
++
+     // fromIndex inclusive, toIndex exclusive
+     // will throw if arr.length == 0
+     private static double median(final long[] arr, final int fromIndex, final int toIndex) {
+@@ -102,7 +128,7 @@ public final class TickData {
+             return null;
+         }
+ 
+-        long totalTimeBetweenTicks = 0L;
++        long totalTimeBetweenTicks = this.startDifferenceSum; // ExoLeaf - running TPS sum
+         int collectedTicks = this.timeData.size();
+ 
+         if (inProgress != null) {
+@@ -110,9 +136,15 @@ public final class TickData {
+             totalTimeBetweenTicks += inProgress.differenceFromLastTick(tickInterval);
+         }
+ 
+-        for (final TickTime time : this.timeData) {
+-            totalTimeBetweenTicks += time.differenceFromLastTick(tickInterval);
++        // ExoLeaf start - running TPS sum: only entries without a previous tick are summed here
++        if (this.entriesWithoutLastTick > 0) {
++            for (final TickTime time : this.timeData) {
++                if (!time.hasLastTick()) {
++                    totalTimeBetweenTicks += time.differenceFromLastTick(tickInterval);
++                }
++            }
+         }
++        // ExoLeaf end - running TPS sum
+         return Double.valueOf((double)collectedTicks / ((double)totalTimeBetweenTicks / 1.0E9));
+     }
+ 
