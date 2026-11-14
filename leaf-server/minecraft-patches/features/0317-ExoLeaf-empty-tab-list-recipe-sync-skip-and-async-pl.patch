@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Sat, 14 Nov 2026 23:57:11 +0500
+Subject: [PATCH] ExoLeaf: empty tab list, recipe sync skip and async player
+ data in lobby mode
+
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 4c3d981d1d6a63cafe4b8350ad527cb81f9b8d1f..f0b18a5bef769044a5e94496368637a318941f05 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -3810,7 +3810,8 @@ public class ServerGamePacketListenerImpl
+         boolean wasHatShown = this.player.isModelPartShown(PlayerModelPart.HAT);
+         this.player.updateOptions(packet.information());
+         this.connection.channel.attr(io.papermc.paper.adventure.PaperAdventure.LOCALE_ATTRIBUTE).set(net.kyori.adventure.translation.Translator.parseLocale(packet.information().language())); // Paper
+-        if (this.player.isModelPartShown(PlayerModelPart.HAT) != wasHatShown) {
++        if (this.player.isModelPartShown(PlayerModelPart.HAT) != wasHatShown
++            && !(this.player.level().exoLobby && org.dreeam.leaf.config.modules.lobby.LobbyMode.hideTabList)) { // ExoLeaf - lobby mode: no tab list to update
+             this.server.getPlayerList().broadcastAll(new ClientboundPlayerInfoUpdatePacket(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_HAT, this.player));
+         }
+     }
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index a60ce14349b711541b32ee1e96ad42349f5a2e54..e95ecccc4fa02fb7b7effcc0866f76b6c89efc34 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -159,6 +159,11 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+ 
+     @Override
+     public void onDisconnect(final DisconnectionDetails details) {
++        // ExoLeaf start - async player data prefetch: nothing will consume it now
++        if (this.authenticatedProfile != null) {
++            this.server.getPlayerList().playerIo.cancelPrefetch(new NameAndId(this.authenticatedProfile));
++        }
++        // ExoLeaf end
+         LOGGER.info("{} lost connection: {}", this.getUserName(), details.reason().getString());
+     }
+ 
+@@ -247,6 +252,12 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+         if (error != null) {
+             this.disconnectAsync(error); // Paper
+         } else {
++            // ExoLeaf start - async player data prefetch: the file read is usually done
++            // by the time the configuration phase asks for it
++            if (org.dreeam.leaf.config.modules.lobby.LobbyMode.asyncDataLoad) {
++                playerList.playerIo.prefetch(new NameAndId(profile));
++            }
++            // ExoLeaf end
+             if (this.server.getCompressionThreshold() >= 0 && !this.connection.isMemoryConnection()) {
+                 // Paper start - Keep compression packet write and setup in the same Netty task
+                 final int compressionThreshold = this.server.getCompressionThreshold();
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 7e27604eb69a79c33549e4f497083f97b78f99b0..55a8c183c34b1b64349a742de877938a2bc8e30b 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -201,13 +201,20 @@ public abstract class PlayerList {
+         playerConnection.send(new ClientboundChangeDifficultyPacket(levelData.getDifficulty(), levelData.isDifficultyLocked()));
+         playerConnection.send(new ClientboundPlayerAbilitiesPacket(player.getAbilities()));
+         playerConnection.send(new ClientboundSetHeldSlotPacket(player.getInventory().getSelectedSlot()));
+-        RecipeManager recipeManager = this.server.getRecipeManager();
+-        playerConnection.send(
+-            new ClientboundUpdateRecipesPacket(recipeManager.getSynchronizedItemProperties(), recipeManager.getSynchronizedStonecutterRecipes())
+-        );
++        // ExoLeaf start - lobby mode: recipes are dead weight in a lobby
++        final boolean exoLobbyJoin = org.dreeam.leaf.config.modules.lobby.LobbyMode.appliesTo(level.getWorld().getName());
++        if (!(exoLobbyJoin && org.dreeam.leaf.config.modules.lobby.LobbyMode.skipRecipeSync)) {
++            RecipeManager recipeManager = this.server.getRecipeManager();
++            playerConnection.send(
++                new ClientboundUpdateRecipesPacket(recipeManager.getSynchronizedItemProperties(), recipeManager.getSynchronizedStonecutterRecipes())
++            );
++        }
++        // ExoLeaf end - lobby mode
+         this.sendPlayerPermissionLevel(player);
+         player.getStats().markAllDirty();
+-        player.getRecipeBook().sendInitialRecipeBook(player);
++        if (!(exoLobbyJoin && org.dreeam.leaf.config.modules.lobby.LobbyMode.skipRecipeSync)) { // ExoLeaf - lobby mode
++            player.getRecipeBook().sendInitialRecipeBook(player);
++        }
+         this.updateEntireScoreboard(level.getScoreboard(), player);
+         ru.moonlightproject.dev.exoleaf.HiddenNametags.onJoin(this, player); // ExoLeaf - lobby mode
+         this.server.invalidateStatus();
+@@ -270,7 +277,10 @@ public abstract class PlayerList {
+         }
+         // CraftBukkit end
+ 
++        // ExoLeaf start - lobby mode: no tab list at all
++        final boolean exoTabHidden = org.dreeam.leaf.config.modules.lobby.LobbyMode.hideTabList && exoLobbyJoin;
+         // CraftBukkit start - sendAll above replaced with this loop
++        if (!exoTabHidden) { // ExoLeaf - lobby mode
+         ClientboundPlayerInfoUpdatePacket packet = ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player)); // Paper - Add Listing API for Player
+ 
+         final List<ServerPlayer> onlinePlayers = Lists.newArrayListWithExpectedSize(this.players.size() - 1); // Paper - Use single player info update packet on join
+@@ -300,6 +310,7 @@ public abstract class PlayerList {
+             player.connection.send(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(onlinePlayers, player)); // Paper - Add Listing API for Player
+         }
+         // Paper end - Use single player info update packet on join
++        } // ExoLeaf - lobby mode
+         player.sentListPacket = true;
+         player.suppressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
+         player.level().getChunkSource().addEntity(player); // Paper - Fire PlayerJoinEvent when Player is actually ready; track entity now
+@@ -549,11 +560,14 @@ public abstract class PlayerList {
+ 
+         // CraftBukkit start
+         // this.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
++        // ExoLeaf start - lobby mode: nobody got the tab list, nothing to remove
++        final boolean exoTabHidden = org.dreeam.leaf.config.modules.lobby.LobbyMode.hideTabList && player.level().exoLobby;
+         ClientboundPlayerInfoRemovePacket packet = new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID()));
+         for (int i = 0; i < this.players.size(); i++) {
+             ServerPlayer otherPlayer = this.players.get(i);
+ 
+-            if (otherPlayer.getBukkitEntity().canSee(player.getBukkitEntity())) {
++            // ExoLeaf - lobby mode - do not send when the tab list is hidden
++            if (!exoTabHidden && otherPlayer.getBukkitEntity().canSee(player.getBukkitEntity())) {
+                 otherPlayer.connection.send(packet);
+             } else {
+                 otherPlayer.getBukkitEntity().onEntityRemove(player);
+@@ -793,7 +807,7 @@ public abstract class PlayerList {
+         // Gale start - Purpur - spread out sending all player info
+         ServerPlayer[] sendAllPlayerInfoBucket = this.sendAllPlayerInfoBuckets[this.sendAllPlayerInfoIn];
+ 
+-        if (sendAllPlayerInfoBucket != null && !(org.dreeam.leaf.config.modules.lobby.LobbyMode.enabled && org.dreeam.leaf.config.modules.lobby.LobbyMode.hideLatency)) { // ExoLeaf - lobby mode
++        if (sendAllPlayerInfoBucket != null && !(org.dreeam.leaf.config.modules.lobby.LobbyMode.enabled && (org.dreeam.leaf.config.modules.lobby.LobbyMode.hideLatency || org.dreeam.leaf.config.modules.lobby.LobbyMode.hideTabList))) { // ExoLeaf - lobby mode
+             for (ServerPlayer target : sendAllPlayerInfoBucket) {
+                 // Gale end - Purpur - spread out sending all player info
+ 
+diff --git a/net/minecraft/world/level/storage/PlayerDataStorage.java b/net/minecraft/world/level/storage/PlayerDataStorage.java
+index 1c1117f3e674ddd009fb1e580670e0140a22b1c0..f7707222a555a061b3195820bb7e150f806d045e 100644
+--- a/net/minecraft/world/level/storage/PlayerDataStorage.java
++++ b/net/minecraft/world/level/storage/PlayerDataStorage.java
+@@ -156,6 +156,36 @@ public class PlayerDataStorage {
+     }
+ 
+     public Optional<CompoundTag> load(final NameAndId nameAndId) {
++        // ExoLeaf start - async player data prefetch: taken if login already pulled the file
++        final java.util.concurrent.CompletableFuture<Optional<CompoundTag>> prefetched = this.prefetched.remove(nameAndId);
++        if (prefetched != null) {
++            return prefetched.join();
++        }
++        // ExoLeaf end
++        return this.load0(nameAndId);
++    }
++
++    // ExoLeaf start - async player data prefetch
++    private final java.util.concurrent.ConcurrentHashMap<NameAndId, java.util.concurrent.CompletableFuture<Optional<CompoundTag>>> prefetched = new java.util.concurrent.ConcurrentHashMap<>();
++
++    /** Starts reading the player's data file on a background thread. The next load() picks it up. */
++    public void prefetch(final NameAndId nameAndId) {
++        if (this.prefetched.size() > 512) {
++            // drop finished loads of players who never made it to the configuration phase
++            this.prefetched.values().removeIf(java.util.concurrent.CompletableFuture::isDone);
++        }
++        this.prefetched.computeIfAbsent(nameAndId,
++            key -> java.util.concurrent.CompletableFuture.supplyAsync(() -> this.load0(key), Util.ioPool()));
++    }
++
++    /** Drops a pending prefetch, e.g. when a login never reaches the game phase. */
++    public void cancelPrefetch(final NameAndId nameAndId) {
++        this.prefetched.remove(nameAndId);
++    }
++    // ExoLeaf end - async player data prefetch
++
++    // ExoLeaf - async player data prefetch - the raw path so prefetch does not eat its own cache entry
++    private Optional<CompoundTag> load0(final NameAndId nameAndId) {
+         Optional<CompoundTag> optTag = this.load(nameAndId, ".dat");
+         if (optTag.isEmpty()) {
+             this.backup(nameAndId, ".dat");

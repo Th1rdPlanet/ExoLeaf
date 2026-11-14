@@ -30,6 +30,9 @@ public class LobbyMode extends ConfigModule {
     public static boolean hideNametags = true;
     public static boolean hideLatency = true;
     public static boolean hidePlayers = true;
+    public static boolean hideTabList = true;
+    public static boolean skipRecipeSync = true;
+    public static boolean asyncDataLoad = true;
 
     public static boolean disableWorldSaving = true;
     public static boolean disablePlayerDataSaving = true;
@@ -86,8 +89,19 @@ public class LobbyMode extends ConfigModule {
         hidePlayers = globalConfig.getBoolean(base + ".players.hide-players", hidePlayers, """
             Игроки не видят друг друга в мире: сервер не отправляет их сущности. Список игроков
             (TAB) и чат это не затрагивает.""");
+        hideTabList = globalConfig.getBoolean(base + ".players.hide-tab-list", hideTabList, """
+            Полностью не отправлять список игроков (TAB): ни вход, ни выход, ни обновления.
+            Игрок видит пустой список. Плагины, рисующие TAB через скорборд, не затрагиваются.""");
         hideLatency = globalConfig.getBoolean(base + ".players.hide-latency", hideLatency,
             "Не рассылать обновления пинга в списке игроков.");
+        skipRecipeSync = globalConfig.getBoolean(base + ".players.skip-recipe-sync", skipRecipeSync, """
+            Не отправлять рецепты и книгу рецептов при входе — один из самых больших пакетов
+            на join. В лобби книга рецептов не нужна. Выключите, если игроки могут уйти
+            из лобби-мира в обычные миры без перезахода.""");
+        asyncDataLoad = globalConfig.getBoolean(base + ".players.async-data-load", asyncDataLoad, """
+            Читать playerdata асинхронно сразу после одобрения входа: к моменту, когда данные
+            игрока понадобятся, файл уже прочитан фоновым потоком. Убирает блокировку
+            основного потока на дисковом I/O при каждом заходе.""");
 
         disableWorldSaving = globalConfig.getBoolean(base + ".saving.disable-world", disableWorldSaving,
             "Не сохранять чанки и сущности: изменения живут до перезапуска.");
