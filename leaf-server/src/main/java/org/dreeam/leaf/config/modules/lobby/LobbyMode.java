@@ -141,7 +141,7 @@ public class LobbyMode extends ConfigModule {
 
     /** Redstone components and blocks that only react to redstone power. */
     public static boolean isRedstone(net.minecraft.world.level.block.Block block) {
-        return block instanceof net.minecraft.world.level.block.RedStoneWireBlock
+        return block instanceof net.minecraft.world.level.block.RedstoneWireBlock
             || block instanceof net.minecraft.world.level.block.DiodeBlock
             || block instanceof net.minecraft.world.level.block.piston.PistonBaseBlock
             || block instanceof net.minecraft.world.level.block.ObserverBlock

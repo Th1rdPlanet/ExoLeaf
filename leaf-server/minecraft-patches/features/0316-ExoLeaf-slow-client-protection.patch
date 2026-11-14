@@ -5,10 +5,10 @@ Subject: [PATCH] ExoLeaf: slow client protection
 
 
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
-index 756967523bca9e3923bdd814522c80afb3732723..9a68118cc681a1996595ce88e4199eaf3deada0f 100644
+index fb0e965c8f5211d5b82d13a0ee8a7a4882b8037a..1a7e552727cf3e3adf6cd614167c92b90373e235 100644
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
-@@ -601,7 +601,29 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -650,7 +650,29 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
      private static int joinAttemptsThisTick; // Paper - Buffer joins to world
      private static int currTick; // Paper - Buffer joins to world
      private static int tickSecond; // Purpur - Max joins per second
@@ -39,14 +39,14 @@ index 756967523bca9e3923bdd814522c80afb3732723..9a68118cc681a1996595ce88e4199eaf
          // Paper start - Buffer joins to world
          if (Connection.currTick != net.minecraft.server.MinecraftServer.currentTick) {
 diff --git a/net/minecraft/server/network/ServerConnectionListener.java b/net/minecraft/server/network/ServerConnectionListener.java
-index 4e6676b57f493ca90e058cdadf324d3627e270a9..ab6a2d6c9d36b7aef6f6b8ed06cad4eef5be4fe7 100644
+index 42408dede2808447281b49f4006c1d8b03c10bf4..72749cb87bfaf369050a896af714490585f45dfe 100644
 --- a/net/minecraft/server/network/ServerConnectionListener.java
 +++ b/net/minecraft/server/network/ServerConnectionListener.java
-@@ -215,6 +215,7 @@ public class ServerConnectionListener {
+@@ -245,6 +245,7 @@ public class ServerConnectionListener {
+     public void tick() {
          synchronized (this.connections) {
-             // Spigot start
-             this.addPending(); // Paper - prevent blocking on adding a new connection while the server is ticking
+             this.addPendingConnections();
 +            ru.moonlightproject.dev.exoleaf.SlowClients.enforce(this.connections); // ExoLeaf - slow client protection
+             // Spigot start
              // This prevents players from 'gaming' the server, and strategically relogging to increase their position in the tick order
              if (org.spigotmc.SpigotConfig.playerShuffle > 0 && MinecraftServer.currentTick % org.spigotmc.SpigotConfig.playerShuffle == 0) {
-                 Collections.shuffle(this.connections);
