@@ -46,7 +46,8 @@ gradle.lifecycle.beforeProject {
     val paperVersionChannel = providers.gradleProperty("channel").get().trim()
     val paperBuildNumber = providers.environmentVariable("BUILD_NUMBER").orNull?.trim()?.toInt()
     val versionString = if (paperBuildNumber == null) {
-        "$mcVersion.local-SNAPSHOT"
+        // ExoLeaf: keep the classic R0.1 format, some plugins parse the version string
+        "$mcVersion-R0.1-SNAPSHOT"
     } else {
         "$mcVersion.build.$paperBuildNumber-${paperVersionChannel.lowercase()}"
     }
