@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ExoLeaf load generator: offline-mode bots for Minecraft 1.21.11 (protocol 774).
+"""ExoLeaf load generator: offline-mode bots for Minecraft 26.3 (protocol 777).
 
 Each bot logs in, finishes configuration, answers keep-alives/pings/teleports and walks
 randomly. Meant for an offline test server without a proxy.
@@ -8,15 +8,16 @@ randomly. Meant for an offline test server without a proxy.
 """
 import argparse, asyncio, random, struct, time, uuid, zlib
 
-PROTOCOL = 774
-# Packet ids for 1.21.11 from the vanilla data generator (reports/packets.json).
+PROTOCOL = 777
+# Packet ids for 26.3, indexed from GameProtocols/ConfigurationProtocols/LoginProtocols.
 L_S_HELLO, L_S_ACK = 0x00, 0x03
 L_C_DISCONNECT, L_C_ENCRYPT, L_C_FINISHED, L_C_COMPRESSION, L_C_QUERY = 0, 1, 2, 3, 4
 L_S_QUERY_ANSWER = 2
-C_C_DISCONNECT, C_C_FINISH, C_C_KEEPALIVE, C_C_PING, C_C_KNOWN_PACKS = 2, 3, 4, 5, 14
+C_C_DISCONNECT, C_C_FINISH, C_C_KEEPALIVE, C_C_PING, C_C_KNOWN_PACKS = 2, 3, 4, 5, 15
 C_S_INFO, C_S_FINISH, C_S_KEEPALIVE, C_S_PONG, C_S_KNOWN_PACKS = 0, 3, 4, 5, 7
-P_C_DISCONNECT, P_C_KEEPALIVE, P_C_PING, P_C_POSITION, P_C_START_CONFIG = 32, 43, 59, 70, 116
-P_S_TELEPORT, P_S_KEEPALIVE, P_S_POS, P_S_PONG, P_S_LOADED, P_S_CONFIG_ACK = 0, 27, 29, 44, 43, 15
+P_C_DISCONNECT, P_C_KEEPALIVE, P_C_PING, P_C_POSITION, P_C_START_CONFIG = 32, 45, 62, 73, 120
+P_S_TELEPORT, P_S_KEEPALIVE, P_S_POS, P_S_PONG, P_S_LOADED, P_S_CONFIG_ACK = 0, 28, 30, 45, 44, 16
+P_S_TICK_END = 13
 
 PLAY_INTERESTING = {P_C_DISCONNECT, P_C_KEEPALIVE, P_C_PING, P_C_POSITION, P_C_START_CONFIG}
 
@@ -56,13 +57,15 @@ def string(s):
 
 
 class Bot:
-    def __init__(self, name, host, port, walk, view=2):
+    def __init__(self, name, host, port, walk, view=2, radius=40, speed=0.2):
         self.name, self.host, self.port, self.walk, self.view = name, host, port, walk, view
         self.threshold = -1
         self.state = "login"
         self.pos = None
         self.home = None
-        self.radius = 40
+        self.radius = radius
+        self.speed = speed
+        self.last_pos_send = 0.0
 
     async def read_packet(self):
         n = shift = 0
@@ -128,7 +131,7 @@ class Bot:
                         raise ConnectionError("login refused" if pid == 0 else "server wants encryption (online mode)")
                 elif self.state == "config":
                     if pid == C_C_KNOWN_PACKS:
-                        self.send(C_S_KNOWN_PACKS, varint(1) + string("minecraft") + string("core") + string("1.21.11"))
+                        self.send(C_S_KNOWN_PACKS, varint(0))
                     elif pid == C_C_KEEPALIVE:
                         self.send(C_S_KEEPALIVE, p[:8])
                     elif pid == C_C_PING:
@@ -147,7 +150,8 @@ class Bot:
                         tid, i = read_varint(p, 0)
                         x, y, z = struct.unpack(">ddd", p[i:i + 24])
                         self.pos = [x, y, z]
-                        self.send(P_S_TELEPORT, varint(tid))
+                        # 26.3: the client echoes its accepted position and rotation back.
+                        self.send(P_S_TELEPORT, varint(tid) + struct.pack(">dddff", x, y, z, 0.0, 0.0))
                         if walker is None:
                             self.send(P_S_LOADED)
                             stats["playing"] += 1
@@ -170,8 +174,10 @@ class Bot:
 
     async def walk_loop(self):
         angle = random.random() * 6.283
+        # Brief settle time after login before moving.
+        await asyncio.sleep(8 + random.random() * 4)
         while True:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.4 + random.random() * 0.1)
             if self.pos is None:
                 continue
             if random.random() < 0.05:
@@ -182,9 +188,17 @@ class Bot:
             dx, dz = self.pos[0] - self.home[0], self.pos[2] - self.home[2]
             if dx * dx + dz * dz > self.radius * self.radius:
                 angle = math.atan2(-dz, -dx) + random.uniform(-0.5, 0.5)
-            self.pos[0] += math.cos(angle) * 0.2
-            self.pos[2] += math.sin(angle) * 0.2
+            self.pos[0] += math.cos(angle) * self.speed
+            self.pos[2] += math.sin(angle) * self.speed
             self.send(P_S_POS, struct.pack(">ddd", *self.pos) + b"\x01")
+            # ServerboundClientTickEndPacket: the server only resets
+            # receivedPositionThisTick on this packet, never on its own ticks.
+            # Without it the bot's second position send ever is an instant kick.
+            self.send(P_S_TICK_END, b"")
+            try:
+                await self.writer.drain()
+            except ConnectionError:
+                return
 
 
 async def main():
@@ -197,11 +211,13 @@ async def main():
     ap.add_argument("--prefix", default="Bot")
     ap.add_argument("--no-walk", action="store_true")
     ap.add_argument("--view-distance", type=int, default=2, help="client view distance (fewer chunks to decode)")
+    ap.add_argument("--radius", type=float, default=40, help="walk radius around spawn point")
+    ap.add_argument("--speed", type=float, default=0.2, help="blocks per move packet (~75ms cadence)")
     a = ap.parse_args()
     tasks = []
     start = time.time()
     for n in range(a.bots):
-        bot = Bot(f"{a.prefix}{n:04d}"[:16], a.host, a.port, not a.no_walk, a.view_distance)
+        bot = Bot(f"{a.prefix}{n:04d}"[:16], a.host, a.port, not a.no_walk, a.view_distance, a.radius, a.speed)
         tasks.append(asyncio.create_task(bot.run(a.duration - (time.time() - start))))
         await asyncio.sleep(1 / a.rate)
 

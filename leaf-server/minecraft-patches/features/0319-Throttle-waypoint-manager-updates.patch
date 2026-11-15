@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Sun, 15 Nov 2026 15:34:58 +0500
+Subject: [PATCH] Throttle waypoint manager updates
+
+
+diff --git a/net/minecraft/server/waypoints/ServerWaypointManager.java b/net/minecraft/server/waypoints/ServerWaypointManager.java
+index 6774051521794990278d5ef5cf6b3dab05d3337e..af2bf4367b10607ea60f3adfc86f23ab0bebbe86 100644
+--- a/net/minecraft/server/waypoints/ServerWaypointManager.java
++++ b/net/minecraft/server/waypoints/ServerWaypointManager.java
+@@ -19,6 +19,14 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+     private final Set<WaypointTransmitter> waypoints = new HashSet<>();
+     private final Set<ServerPlayer> players = new HashSet<>();
+     private final Table<ServerPlayer, WaypointTransmitter, WaypointTransmitter.Connection> connections = HashBasedTable.create();
++    // Leaf start - waypoint update throttling
++    private final it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<ServerPlayer> playerUpdateThrottle = new it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<>();
++    private final it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<WaypointTransmitter> waypointUpdateThrottle = new it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<>();
++    {
++        this.playerUpdateThrottle.defaultReturnValue(Integer.MIN_VALUE);
++        this.waypointUpdateThrottle.defaultReturnValue(Integer.MIN_VALUE);
++    }
++    // Leaf end - waypoint update throttling
+     // Paper start - optimize ServerWaypointManager with locator bar disabled
+     public boolean locatorBarEnabled; // Avoid a gamerule lookup for each player
+ 
+@@ -46,6 +54,14 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+         if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+         if (org.dreeam.leaf.config.modules.async.SparklyPaperParallelWorldTicking.enabled) ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, "Cannot update waypoints off-main"); // Leaf - SparklyPaper - parallel world ticking
+         if (this.waypoints.contains(waypoint)) {
++            // Leaf start - waypoint update throttling
++            if (org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.enabled) {
++                final int tick = this.level.getServer().getTickCount();
++                final int delta = tick - this.waypointUpdateThrottle.getInt(waypoint);
++                if (delta >= 0 && delta < org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.updateIntervalTicks) return;
++                this.waypointUpdateThrottle.put(waypoint, tick);
++            }
++            // Leaf end - waypoint update throttling
+             Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
+             SetView<ServerPlayer> potentialPlayers = Sets.difference(this.players, playerConnection.keySet());
+ 
+@@ -65,6 +81,7 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+         this.connections.column(waypoint).forEach((player, connection) -> connection.disconnect());
+         Tables.transpose(this.connections).row(waypoint).clear();
+         this.waypoints.remove(waypoint);
++        this.waypointUpdateThrottle.removeInt(waypoint); // Leaf - waypoint update throttling
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
+@@ -85,6 +102,14 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+     public void updatePlayer(final ServerPlayer player) {
+         if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+         if (org.dreeam.leaf.config.modules.async.SparklyPaperParallelWorldTicking.enabled) ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.level, "Cannot update player for waypoints off-main"); // Leaf - SparklyPaper - parallel world ticking
++        // Leaf start - waypoint update throttling
++        if (org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.enabled) {
++            final int tick = this.level.getServer().getTickCount();
++            final int delta = tick - this.playerUpdateThrottle.getInt(player);
++            if (delta >= 0 && delta < org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.updateIntervalTicks) return;
++            this.playerUpdateThrottle.put(player, tick);
++        }
++        // Leaf end - waypoint update throttling
+         Map<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnections = this.connections.row(player);
+         SetView<WaypointTransmitter> potentialWaypoints = Sets.difference(this.waypoints, waypointConnections.keySet());
+ 
+@@ -105,6 +130,7 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+         });
+         this.untrackWaypoint(player);
+         this.players.remove(player);
++        this.playerUpdateThrottle.removeInt(player); // Leaf - waypoint update throttling
+     }
+ 
+     public void breakAllConnections() {

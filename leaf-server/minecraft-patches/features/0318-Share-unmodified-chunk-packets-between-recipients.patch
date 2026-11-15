@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Sun, 15 Nov 2026 15:34:58 +0500
+Subject: [PATCH] Share unmodified chunk packets between recipients
+
+
+diff --git a/io/papermc/paper/FeatureHooks.java b/io/papermc/paper/FeatureHooks.java
+index c3025e2d66b2b7894483c91295ef6de6c0edce5c..a33c4b5aac71db16ee90b5ef183d09270f2454cc 100644
+--- a/io/papermc/paper/FeatureHooks.java
++++ b/io/papermc/paper/FeatureHooks.java
+@@ -58,6 +58,11 @@ public final class FeatureHooks {
+ 
+             final Boolean shouldModify = chunk.getLevel().chunkPacketBlockController.shouldModify(player, chunk);
+             player.connection.send(refreshPackets.computeIfAbsent(shouldModify, s -> { // Use connection to prevent creating firing event
++                // Leaf start - shared chunk packet cache
++                if (!(Boolean) s) {
++                    return net.minecraft.server.network.PlayerChunkSender.getOrCreateSharedChunkPacket((net.minecraft.server.level.ServerLevel) chunk.getLevel(), chunk);
++                }
++                // Leaf end - shared chunk packet cache
+                 return new ClientboundLevelChunkWithLightPacket(chunk, chunk.getLevel().getLightEngine(), null, null, (Boolean) s);
+             }));
+             // Paper end - Anti-Xray
+diff --git a/net/minecraft/server/network/PlayerChunkSender.java b/net/minecraft/server/network/PlayerChunkSender.java
+index 196c01fe5f200ed57e6f23e0939cac616305571a..e1efe541f3c9d2ebff9411f5d2f3b4b76f833eb2 100644
+--- a/net/minecraft/server/network/PlayerChunkSender.java
++++ b/net/minecraft/server/network/PlayerChunkSender.java
+@@ -78,10 +78,39 @@ public class PlayerChunkSender {
+         }
+     }
+ 
++    private static final long SHARED_CHUNK_PACKET_TTL_TICKS = 100L; // Leaf - shared chunk packet cache
++
++    // Leaf start - shared chunk packet cache
++    // When the anti-xray controller will not modify the packet, the exact same
++    // ClientboundLevelChunkWithLightPacket is built for every recipient. Cache it on
++    // the chunk to skip the expensive section/heightmap/block-entity extraction for
++    // subsequent sends. markUnsaved() invalidates on content changes; the TTL covers
++    // light drift not funnelled through it.
++    public static ClientboundLevelChunkWithLightPacket getOrCreateSharedChunkPacket(final ServerLevel level, final LevelChunk chunk) {
++        final long tick = level.getServer().getTickCount();
++        final java.lang.ref.SoftReference<ClientboundLevelChunkWithLightPacket> ref = chunk.leaf$sharedChunkPacketRef;
++        ClientboundLevelChunkWithLightPacket shared = ref == null ? null : ref.get();
++        if (shared == null || tick - chunk.leaf$sharedChunkPacketTick > SHARED_CHUNK_PACKET_TTL_TICKS) {
++            shared = new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null, false);
++            chunk.leaf$sharedChunkPacketRef = new java.lang.ref.SoftReference<>(shared);
++            chunk.leaf$sharedChunkPacketTick = tick;
++        }
++        return shared;
++    }
++    // Leaf end - shared chunk packet cache
++
+     public static void sendChunk(final ServerGamePacketListenerImpl connection, final ServerLevel level, final LevelChunk chunk) { // Paper - rewrite chunk system - public
+         // Paper start - Anti-Xray
+         final boolean shouldModify = level.chunkPacketBlockController.shouldModify(connection.player, chunk);
+-        connection.send(new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null, shouldModify));
++        // Leaf start - shared chunk packet cache
++        final ClientboundLevelChunkWithLightPacket packet;
++        if (shouldModify) {
++            packet = new ClientboundLevelChunkWithLightPacket(chunk, level.getLightEngine(), null, null, true);
++        } else {
++            packet = getOrCreateSharedChunkPacket(level, chunk);
++        }
++        connection.send(packet);
++        // Leaf end - shared chunk packet cache
+         // Paper end - Anti-Xray
+         // Paper start - PlayerChunkLoadEvent
+         if (io.papermc.paper.event.packet.PlayerChunkLoadEvent.getHandlerList().getRegisteredListeners().length > 0) {
+diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
+index 9851a60140f9989fbac317db200d8484d43ee16c..5ac553303357a6285e89f8b046549df5a863d3a1 100644
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -272,10 +272,18 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+     }
+     // Paper end
+ 
++    // Leaf start - shared chunk packet cache
++    // Soft reference: serialized chunk data is sizeable, let the GC reclaim cached
++    // packets under heap pressure instead of retaining them for every loaded chunk.
++    public volatile java.lang.ref.SoftReference<net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket> leaf$sharedChunkPacketRef;
++    public volatile long leaf$sharedChunkPacketTick = Long.MIN_VALUE;
++    // Leaf end - shared chunk packet cache
++
+     @Override
+     public void markUnsaved() {
+         boolean wasUnsaved = this.isUnsaved();
+         super.markUnsaved();
++        this.leaf$sharedChunkPacketRef = null; // Leaf - shared chunk packet cache: content changed
+         if (!wasUnsaved) {
+             this.unsavedListener.setUnsaved(this.chunkPos);
+         }

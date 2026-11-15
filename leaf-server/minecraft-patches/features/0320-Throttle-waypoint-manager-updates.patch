@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1VicTim1 <122aaa121@gmail.com>
+Date: Sun, 15 Nov 2026 22:12:40 +0500
+Subject: [PATCH] Throttle waypoint manager updates
+
+Per-player and per-waypoint tick-interval gating, scaled up to x8 while
+the server is behind on ticks, plus reused scratch lists in place of an
+ImmutableSet.copyOf per call.
+
+diff --git a/net/minecraft/server/waypoints/ServerWaypointManager.java b/net/minecraft/server/waypoints/ServerWaypointManager.java
+index af2bf4367b10607ea60f3adfc86f23ab0bebbe86..c70117fac5403ff8ead088c9aa60e5466e4069fd 100644
+--- a/net/minecraft/server/waypoints/ServerWaypointManager.java
++++ b/net/minecraft/server/waypoints/ServerWaypointManager.java
+@@ -22,10 +22,36 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+     // Leaf start - waypoint update throttling
+     private final it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<ServerPlayer> playerUpdateThrottle = new it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<>();
+     private final it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<WaypointTransmitter> waypointUpdateThrottle = new it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap<>();
++    private final java.util.ArrayList<Map.Entry<ServerPlayer, WaypointTransmitter.Connection>> waypointConnScratch = new java.util.ArrayList<>();
++    private final java.util.ArrayList<Map.Entry<WaypointTransmitter, WaypointTransmitter.Connection>> playerConnScratch = new java.util.ArrayList<>();
+     {
+         this.playerUpdateThrottle.defaultReturnValue(Integer.MIN_VALUE);
+         this.waypointUpdateThrottle.defaultReturnValue(Integer.MIN_VALUE);
+     }
++
++    // Adaptive interval: vanilla speed while the server keeps up, base interval
++    // once behind (mspt > 50), scaled x2/x4/x8 at mspt > 100/200/400 (cap x8).
++    private int updateInterval() {
++        final long[] times = this.level.getServer().getTickTimesNanos();
++        long sum = 0;
++        int n = 0;
++        for (final long t : times) {
++            if (t > 0) {
++                sum += t;
++                n++;
++            }
++        }
++        if (n == 0) return 1;
++        final double mspt = sum / (n * 1.0e6);
++        if (mspt <= 50.0) return 1;
++        int mult = 1;
++        double lim = 100.0;
++        while (mspt > lim && mult < 8) {
++            mult <<= 1;
++            lim *= 2.0;
++        }
++        return org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.updateIntervalTicks * mult;
++    }
+     // Leaf end - waypoint update throttling
+     // Paper start - optimize ServerWaypointManager with locator bar disabled
+     public boolean locatorBarEnabled; // Avoid a gamerule lookup for each player
+@@ -58,16 +84,21 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+             if (org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.enabled) {
+                 final int tick = this.level.getServer().getTickCount();
+                 final int delta = tick - this.waypointUpdateThrottle.getInt(waypoint);
+-                if (delta >= 0 && delta < org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.updateIntervalTicks) return;
++                if (delta >= 0 && delta < this.updateInterval()) return;
+                 this.waypointUpdateThrottle.put(waypoint, tick);
+             }
+             // Leaf end - waypoint update throttling
+             Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
+             SetView<ServerPlayer> potentialPlayers = Sets.difference(this.players, playerConnection.keySet());
+ 
+-            for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(playerConnection.entrySet())) {
++            // Leaf start - waypoint update throttling: reuse scratch list instead of building an ImmutableSet per call
++            final java.util.ArrayList<Entry<ServerPlayer, WaypointTransmitter.Connection>> scratch = this.waypointConnScratch;
++            scratch.clear();
++            scratch.addAll(playerConnection.entrySet());
++            for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : scratch) {
+                 this.updateConnection(waypointConnection.getKey(), waypoint, waypointConnection.getValue());
+             }
++            // Leaf end - waypoint update throttling
+ 
+             for (ServerPlayer player : potentialPlayers) {
+                 this.createConnection(player, waypoint);
+@@ -106,16 +137,21 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+         if (org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.enabled) {
+             final int tick = this.level.getServer().getTickCount();
+             final int delta = tick - this.playerUpdateThrottle.getInt(player);
+-            if (delta >= 0 && delta < org.dreeam.leaf.config.modules.opt.OptimizeWaypoint.updateIntervalTicks) return;
++            if (delta >= 0 && delta < this.updateInterval()) return;
+             this.playerUpdateThrottle.put(player, tick);
+         }
+         // Leaf end - waypoint update throttling
+         Map<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnections = this.connections.row(player);
+         SetView<WaypointTransmitter> potentialWaypoints = Sets.difference(this.waypoints, waypointConnections.keySet());
+ 
+-        for (Entry<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(waypointConnections.entrySet())) {
++        // Leaf start - waypoint update throttling: reuse scratch list instead of building an ImmutableSet per call
++        final java.util.ArrayList<Entry<WaypointTransmitter, WaypointTransmitter.Connection>> scratch = this.playerConnScratch;
++        scratch.clear();
++        scratch.addAll(waypointConnections.entrySet());
++        for (Entry<WaypointTransmitter, WaypointTransmitter.Connection> waypointConnection : scratch) {
+             this.updateConnection(player, waypointConnection.getKey(), waypointConnection.getValue());
+         }
++        // Leaf end - waypoint update throttling
+ 
+         for (WaypointTransmitter waypoint : potentialWaypoints) {
+             this.createConnection(player, waypoint);
